@@ -1,0 +1,257 @@
+//indentation handling
+indentation = _{(" " | "\t")+}
+spandret = _{(" "*~"\n")*}
+
+firrtl_file = {(buildinfo~"\n")?~circuit~spandret~" "*~EOI}
+
+buildinfo = {";"~oneline}
+oneline = _{(!"\n"~ANY)*}
+
+circuit = {"circuit"~" "+~idandkeywordid~colonsp~info?~"\n"?~(spandret~module_children)?}
+
+//module indentation
+module = {"module"~" "+~idandkeywordid~colonsp~info?~"\n"?~(spandret~port_children)?~"\n"?~(spandret~stmt_children_in_module)?}
+modules = _{module_first~("\n"?~spandret~module_continue)*}
+module_first = _{module}
+module_continue = _{PEEK_ALL~module}
+module_children = {PEEK_ALL~PUSH(indentation)~modules~DROP}
+
+//port indentation
+port = {dir~" "+~idandkeywordid~colonsp~wtype}
+// ports = _{port_first~("\n"+~port_continue)*}
+ports = _{port_first~("\n"?~spandret~port_continue)*}
+port_first = _{port}
+port_continue = _{PEEK_ALL~port}
+port_children = {PEEK_ALL~PUSH(indentation)~ports~DROP}
+
+
+dir = {"input"|"output"}
+wtype = {
+  uint~("<"~intlit~">")?|
+  sint~("<"~intlit~">")?|
+  clock|
+  asyncreset|
+  reset|
+  analog~("<"~intlit~">")?|
+  "{"~" "*~fieldwcomma*~" "*~"}"
+}
+
+stmt_first = _{stmt}
+stmt_continue = _{PEEK_ALL~stmt}
+stmts = _{stmt_first~("\n"?~spandret~stmt_continue)*}
+stmt_children_in_whenelse = {PEEK_ALL~PUSH(indentation)~stmts~DROP}
+stmt_children_in_module = {PEEK_ALL~PUSH(indentation)~stmts~DROP}
+whenstmt_children_in_module = {PEEK_ALL~PUSH(indentation)~whenstmt~DROP}
+
+whenstmt = {whenblock~("\n"~PEEK_ALL~elseblock)?}
+whenblock = {whentoken~" "+~exp~colonsp~info?~("\n"~stmt_children_in_whenelse)?}
+// whenblock = {whentoken~" "+~exp~colonsp~info?~("\n"?~stmt_children_in_whenelse)?} //oneline whenblock
+elseblock = {elsetoken~" "+~(whenstmt|(colonsp~info?~("\n"~stmt_children_in_whenelse)?))}
+// elseblock = {elsetoken~" "+~(whenstmt|(colonsp~info?~("\n"?~stmt_children_in_whenelse)?))} //oneline elseblock
+whentoken = _{"when"}
+elsetoken = _{"else"}
+
+simple_reset0 = _{"reset"~" "+~"=>"~" "+~"("~exp~commasp~exp~")"}
+simple_reset = {("("~" "*~simple_reset0~" "*~")")|simple_reset0}
+reset_block = {simple_reset~" "*~info?}
+indented_reset_block = _{PEEK_ALL~PUSH(indentation)~reset_block~DROP}
+
+stmt = {
+  wire~" "+~idandkeywordid~colonsp~wtype~" "*~info?
+  |node~" "+~idandkeywordid~eqsp~exp~" "*~info?
+  |skip~" "*~info?
+  |reg~" "+~idandkeywordid~colonsp~wtype~commasp~exp~" "*~("with"~colonsp~(reset_block|("\n"~indented_reset_block)))?~info?
+  |exp~connect~exp~" "*~info?
+  |exp~partialconnect~exp~" "*~info?
+  |exp~isinvalid~exp~" "*~info?
+  |whenstmt
+}
+
+eqsp = _{" "*~"="~" "*}
+
+wire = {"wire"}
+reg = {"reg"}
+mem = {"mem"}
+cmem = {"cmem"}
+smem = {"smem"}
+inst = {"inst"}
+node = {"node"}
+stop = {"stop("}
+printf = {"printf("}
+skip = {"skip"}
+attach = {"attach"}
+assert = {"assert"}
+assume = {"assume"}
+cover = {"cover"}
+
+connect = {" "*~"<="~" "*}
+partialconnect = {" "*~"<-"~" "*}
+isinvalid = {" "*~"is"~" "*~"invalid"~" "*}
+
+exp = {exp_first~(exp_continue)*}
+
+exp_first = _{
+  uint~("<"~intlit~">")?~"("~intlit~")"|
+  sint~("<"~intlit~">")?~"("~intlit~")"|
+  mux~exp~commasp~exp~commasp~exp~")"|
+  primop~exp?~(commasp~exp)*~intlit?~(commasp~intlit)*~")"|
+  validif~exp~commasp~exp~")"|
+  idandkeywordidexceptspecialtoken
+}
+
+idandkeywordidexceptspecialtoken = _{
+  !(mux|validif|primop)~idandkeywordid
+}
+
+exp_continue = _{
+  op_dot~fieldid|
+  //op_dot~DoubleLit|
+  "["~intlit~"]"|
+  "["~exp~"]"
+}
+
+op_dot = {"."}
+
+mux = {"mux("}
+validif = {"validif("}
+uint = {"UInt"}
+sint = {"SInt"}
+analog = {"Analog"}
+clock = {"Clock"}
+asyncreset = {"AsyncReset"}
+reset = {"Reset"}
+
+fieldwcomma = _{field~commasp?}
+field = {(wflip|woflip)~colonsp~wtype}
+commasp = _{" "*~","~" "*}
+colonsp = _{" "*~":"~" "*}
+
+
+wflip = _{isflip~fieldid}
+woflip = _{fieldid}
+
+isflip = {"flip"~" "+}
+
+idandkeywordid = {id|keywordasid}
+fieldid = {id|relaxedid|unsignedint|keywordasid}
+id = {legalstartchar ~ (legalidchar)*}
+relaxedid = {(legalstartchar)+}
+
+intlit = {unsignedint|signedint|hexlit|octallit|binarylit}
+unsignedint = {"0"|posint}
+signedint = {sign~posint}
+hexlit = {"\"h"~sign?~hexnum~"\""}
+octallit = {"\"o"~sign?~octanum~"\""}
+binarylit = {"\"b"~sign?~binarynum~"\""}
+
+hexnum = {hexdigit+}
+octanum = {octadigit+}
+binarynum = {binarydigit+}
+
+//fragments. parser not generated
+primop = {
+	"add("
+	| "sub("
+	| "mul("
+	| "div("
+	| "rem("
+	| "lt("
+	| "leq("
+	| "gt("
+	| "geq("
+	| "eq("
+	| "neq("
+	| "pad("
+	| "asUInt("
+	| "asAsyncReset("
+	| "asSInt("
+	| "asClock("
+	| "asFixedPoint("
+	| "asInterval("
+	| "shl("
+	| "shr("
+	| "dshl("
+	| "dshr("
+	| "cvt("
+	| "neg("
+	| "not("
+	| "and("
+	| "or("
+	| "xor("
+	| "andr("
+	| "orr("
+	| "xorr("
+	| "cat("
+	| "bits("
+	| "head("
+	| "tail("
+	| "incp("
+	| "decp("
+	| "setp("
+	| "wrap("
+	| "clip("
+	| "squz("}
+
+
+keywordasid = {
+  "circuit"
+	| "module"
+	| "extmodule"
+	| "parameter"
+	| "input"
+	| "output"
+	| "UInt"
+	| "SInt"
+	| "Clock"
+	| "Analog"
+	| "Fixed"
+	| "flip"
+	| "wire"
+	| "reg"
+	| "with"
+	| "reset"
+	| "mem"
+	| "depth"
+	| "reader"
+	| "writer"
+	| "readwriter"
+	| "inst"
+	| "of"
+	| "node"
+	| "is"
+	| "invalid"
+	| "when"
+	| "else"
+	| "stop"
+	| "printf"
+	| "skip"
+	| "old"
+	| "new"
+	| "undefined"
+	| "mux"
+	| "validif"
+	| "cmem"
+	| "smem"
+	| "mport"
+	| "infer"
+	| "read"
+	| "write"
+	| "rdwr" }
+
+sign = {"+"|"-"}
+
+legalstartchar = _{ASCII_ALPHA|"_"}
+
+legalidchar = _{legalstartchar|digit|"$"}
+posint = {ASCII_NONZERO_DIGIT~digit*}
+
+info = {"@["~eoinfo*}
+eoinfo = _{
+  !"\n"
+  ~ANY
+}
+
+digit = _{ASCII_DIGIT}
+hexdigit = _{ASCII_HEX_DIGIT}
+octadigit = _{ASCII_OCT_DIGIT}
+binarydigit = _{ASCII_BIN_DIGIT}
